@@ -68,10 +68,14 @@ app.post("/login",async(req,res)=>{
         return res.status(400).json({message:"Invalid credentials"});
     }
     const sessionId=Date.now().toString();
+    const device=req.headers["user-agent"];
+    const ip=req.ip;
 
     sessions.push({
         sessionId:sessionId,
         username:user.username,
+        device:device,
+        ip:ip,
         createdAt:new Date()
     })
 
@@ -104,7 +108,7 @@ res.cookie("refreshToken",refreshToken,{
     httpOnly:true,
     sameSite:"strict",
     secure:false,
-    maxAge:60*60*1000
+    maxAge:7*24*60*60*1000
 })
 
 console.log(sessions);
@@ -126,6 +130,12 @@ app.post("/refresh",(req,res)=>{
     try{
         const decoded=jwt.verify(refreshToken,secret);
 
+        const sessionExists=sessions.find(s=>s.sessionId===decoded.sessionId)
+
+    if(!sessionExists){
+    return res.status(401).json({message:"Session expired"});
+}
+
         const newAccessToken=jwt.sign({
             name:decoded.name,
             sessionId:decoded.sessionId
@@ -146,6 +156,52 @@ app.post("/refresh",(req,res)=>{
 
     }
 })
+
+app.post("/logout-device", authMiddleware, (req,res)=>{
+
+    const {sessionId} = req.body;
+
+    sessions = sessions.filter(
+        s => s.sessionId !== sessionId
+    );
+
+    res.json({message:"Device logged out"});
+});
+
+app.post("/logout-all", authMiddleware,(req,res)=>{
+
+    sessions = sessions.filter(
+        s => s.username !== req.decoded.name
+    );
+
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
+    res.json({message:"Logged out from all devices"});
+});
+
+app.get("/sessions",authMiddleware,(req,res)=>{
+    const userSession=sessions.filter(s=>s.username===req.decoded.name);
+
+    res.json({sessions:userSession});
+});
+
+app.get("/logout",authMiddleware,(req,res)=>{
+
+    const refreshToken=req.cookies.refreshToken;
+    const sessionId=req.decoded.sessionId;
+
+    refreshTokens = refreshTokens.filter(
+        t => t !== refreshToken
+    );
+    
+    sessions=sessions.filter(s=>s.sessionId!==sessionId)
+
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+
+    res.json({message:"Logout successfully"});
+});
 
 
 
