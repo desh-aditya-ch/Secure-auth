@@ -14,25 +14,29 @@ app.use(cookieParser());
 
 let users=[];
 let sessions=[];
+let refreshTokens=[];
 
 function authMiddleware(req,res,next){
-    const token=req.cookies.token;
+    const token=req.cookies.accessToken;
     if(!token){
         return res.status(401).json({message:"Token Not Found"});
     }
     try{
-        const isVerified= jwt.verify(token,secret);
-        req.decoded=isVerified;
+        const decoded= jwt.verify(token,secret);
+        const sessionExists=sessions.find(u=>u.sessionId===decoded.sessionId);
+
+        if(!sessionExists){
+        return res.status(401).json({message:"Session expired"});
+    }
+
+        req.decoded=decoded;
         next();
     }
     catch(err){
         return res.status(401).json({message:"Invalid token"});
     }
-    const sessionExists=sessions.find(u=>u.sessionId===isVerified.sessionId);
 
-    if(!sessionExists){
-        return res.status(401).json({message:"Session expired"});
-    }
+    
 }
 
 
@@ -72,7 +76,7 @@ app.post("/login",async(req,res)=>{
     })
 
 
-    const token=jwt.sign(
+    const accessToken=jwt.sign(
     {
         name:user.username,
         sessionId:sessionId
@@ -80,16 +84,70 @@ app.post("/login",async(req,res)=>{
     secret,
     {expiresIn:"1h"}
 )
-res.cookie("token",token,{
+
+    const refreshToken=jwt.sign({
+        name:user.username,
+        sessionId:sessionId
+    },
+    secret,
+    {expiresIn:"7d"}
+) 
+refreshTokens.push(refreshToken);
+
+res.cookie("accessToken",accessToken,{
     httpOnly:true,
     sameSite:"strict",
     secure:false,
     maxAge:60*60*1000
 });
+res.cookie("refreshToken",refreshToken,{
+    httpOnly:true,
+    sameSite:"strict",
+    secure:false,
+    maxAge:60*60*1000
+})
+
+console.log(sessions);
 
 res.status(200).json({message:"Login Successful"});
 
 })
+
+app.post("/refresh",(req,res)=>{
+    const refreshToken=req.cookies.refreshToken;
+
+    if(!refreshToken){
+        return res.status(401).json({message:"Invalid refreshToken"});
+    }
+
+    if(!refreshTokens.includes(refreshToken)){
+        return res.status(401).json({message:"refreshToken missing"});
+    }
+    try{
+        const decoded=jwt.verify(refreshToken,secret);
+
+        const newAccessToken=jwt.sign({
+            name:decoded.name,
+            sessionId:decoded.sessionId
+        },
+        secret,
+        {expiresIn:"1h"},
+    );
+    res.cookie("accessToken",newAccessToken,{
+        httpOnly:true,
+        sameSite:"strict",
+        secure:false,
+        maxAge:60*60*1000
+    })
+    res.json({message:"Refresh Token Generated"});
+    }
+    catch{
+        return res.status(403).json({message:"Invalid refresh token"});
+
+    }
+})
+
+
 
 app.get("/users",authMiddleware,(req,res)=>{
     res.status(200).json({data:req.decoded});
